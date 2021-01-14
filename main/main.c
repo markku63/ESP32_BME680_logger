@@ -9,15 +9,24 @@
 #include "bme680.h"
 #include "util.h"
 
-/* I2C pins on Adafuit Huzzah32 a.k.a. ESP32 Feather */
+/* I2C pins on Adafuit Huzzah32 a.k.a. ESP32 Feather
+ * TODO: put these in a Kconfig file
+ */
 #define SDA_PIN 23
 #define SCL_PIN 22
 
+/* tag for log output */
 static const char *TAG = "BME680_logger";
 
+/* global variables
+ * keep large structs out of stack
+ */
 static struct bme680_dev sensor;
 static struct bme680_field_data data;
 
+/* setup function for I2C:
+ * I2C controller 0, internal pullups enabled, 400kHz
+ */
 static esp_err_t i2c_init()
 {
     const int port = I2C_NUM_0;
