@@ -1,0 +1,1 @@
+Copy the files `bsec_serialized_configurations_iaq.c` and `bsec_serialized_configurations_iaq.h` from the BSEC package directory `config/generic_33v_3s_4d` to this directory.

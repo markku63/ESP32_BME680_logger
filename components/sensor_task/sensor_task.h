@@ -1,0 +1,1 @@
+extern void sensor_task(void* param);

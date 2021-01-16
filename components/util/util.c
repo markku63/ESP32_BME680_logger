@@ -19,6 +19,31 @@
 
 static const char *TAG = "I2C utilities";
 
+/* I2C pins on Adafuit Huzzah32 a.k.a. ESP32 Feather
+ * TODO: put these in a Kconfig file
+ */
+#define SDA_PIN 23
+#define SCL_PIN 22
+
+/* setup function for I2C:
+ * I2C controller 0, internal pullups enabled, 400kHz
+ */
+esp_err_t i2c_init()
+{
+    const int port = I2C_NUM_0;
+    i2c_config_t conf =
+        {
+            .mode = I2C_MODE_MASTER,
+            .sda_io_num = SDA_PIN,
+            .sda_pullup_en = GPIO_PULLUP_ENABLE,
+            .scl_io_num = SCL_PIN,
+            .scl_pullup_en = GPIO_PULLUP_ENABLE,
+            .master.clk_speed = 400000
+        };
+    i2c_param_config(port, &conf);
+    return i2c_driver_install(port, conf.mode, 0, 0, 0);
+}
+
 /**
  * Wait for a specified number of milliseconds.
  * @param period    the length of delay in milliseconds

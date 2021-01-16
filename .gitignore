@@ -117,3 +117,9 @@ $RECYCLE.BIN/
 
 build/
 *.old
+components/BSEC/*
+!components/BSEC/CMakeLists.txt
+!components/BSEC/README.md
+components/BSEC_config/*
+!components/BSEC_config/CMakeLists.txt
+!components/BSEC_config/README.md
