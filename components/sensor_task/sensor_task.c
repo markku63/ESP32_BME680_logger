@@ -2,6 +2,7 @@
 #include "freertos/task.h"
 #include "nvs.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "bme680.h"
 #include "util.h"
 #include "bsec_interface.h"
@@ -135,43 +136,115 @@ void sensor_task(void * param) {
       ESP_LOGE(TAG, "Failed to update BSEC subscription, error: %d", bsec_res);
       ESP_ERROR_CHECK(ESP_FAIL);
     }
-
-    ESP_LOGI(TAG, "Configuring sensor");
-    sensor.tph_sett.os_hum = BME680_OS_2X;
-    sensor.tph_sett.os_pres = BME680_OS_4X;
-    sensor.tph_sett.os_temp = BME680_OS_8X;
-    sensor.tph_sett.filter = BME680_FILTER_SIZE_3;
-    sensor.gas_sett.run_gas = BME680_ENABLE_GAS_MEAS;
-    sensor.gas_sett.heatr_temp = 320;
-    sensor.gas_sett.heatr_dur = 150;
-    sensor.power_mode = BME680_FORCED_MODE;
-    bme_req_settings = BME680_OST_SEL | BME680_OSP_SEL | BME680_OSH_SEL | BME680_FILTER_SEL | BME680_GAS_SENSOR_SEL;
-    ESP_ERROR_CHECK((bme_rslt = bme680_set_sensor_settings(bme_req_settings, &sensor)));
-    ESP_ERROR_CHECK((bme_rslt = bme680_set_sensor_mode(&sensor)));
-
+    
     /* Main loop */
-    ESP_LOGI(TAG, "Read sensor data");
+    ESP_LOGI(TAG, "Start reading sensor data");
     while (1) {
+      int64_t timestamp;
+      int64_t sleep_interval;
+      bsec_bme_settings_t sensor_settings;
+      uint8_t num_bsec_inputs;
+      uint8_t num_bsec_outputs;
+      bsec_input_t inputs[BSEC_MAX_PHYSICAL_SENSOR];
+      bsec_output_t outputs[BSEC_NUMBER_OUTPUTS];
+
+      timestamp = esp_timer_get_time() * 1000LL;
+      bsec_res = bsec_sensor_control(timestamp, &sensor_settings);
+
+      if (sensor_settings.trigger_measurement) {
+        sensor.tph_sett.os_hum = sensor_settings.humidity_oversampling;
+        sensor.tph_sett.os_pres = sensor_settings.pressure_oversampling;
+        sensor.tph_sett.os_temp = sensor_settings.temperature_oversampling;
+        sensor.gas_sett.run_gas = sensor_settings.run_gas;
+        sensor.gas_sett.heatr_temp = sensor_settings.heater_temperature;
+        sensor.gas_sett.heatr_dur = sensor_settings.heating_duration;
+        sensor.power_mode = BME680_FORCED_MODE;
+
+        bme_req_settings = BME680_OST_SEL | BME680_OSP_SEL | BME680_OSH_SEL | BME680_GAS_SENSOR_SEL;
+        bme_rslt = bme680_set_sensor_settings(bme_req_settings, &sensor);
+        bme_rslt = bme680_set_sensor_mode(&sensor);
+
         /* Wait until measurement is ready */
         bme680_get_profile_dur(&period, &sensor);
         vTaskDelay(pdMS_TO_TICKS(period));
+      }
 
-        /* Fetch and display measurement results*/
-        ESP_ERROR_CHECK((bme_rslt = bme680_get_sensor_data(&data, &sensor)));
-        printf("T: %.2f degC, P: %.2f hPa, H: %.2f %%rH ",
-               data.temperature, data.pressure / 100.0f, data.humidity);
-        /* Avoid using measurements from an unstable heating setup */
-        if (data.status & BME680_GASM_VALID_MSK) {
-            printf(", G: %f ohms", data.gas_resistance);
+      /* make sure the sensor is ready to be read */
+      bme_rslt = bme680_get_sensor_mode(&sensor);
+      while (sensor.power_mode == BME680_FORCED_MODE) {
+        vTaskDelay(pdMS_TO_TICKS(5));
+        bme_rslt = bme680_get_sensor_mode(&sensor);
+      }
+
+      num_bsec_inputs = 0;
+      if (sensor_settings.process_data) {
+        /* Fetch and process measurement results*/
+        bme_rslt = bme680_get_sensor_data(&data, &sensor);
+        if (data.status & BME680_NEW_DATA_MSK) {
+          if (sensor_settings.process_data & BSEC_PROCESS_PRESSURE) {
+            inputs[num_bsec_inputs].sensor_id = BSEC_INPUT_PRESSURE;
+            inputs[num_bsec_inputs].signal = data.pressure;
+            inputs[num_bsec_inputs].time_stamp = timestamp;
+            ++num_bsec_inputs;
+          }
+          if (sensor_settings.process_data & BSEC_PROCESS_TEMPERATURE) {
+            inputs[num_bsec_inputs].sensor_id = BSEC_INPUT_TEMPERATURE;
+            inputs[num_bsec_inputs].signal = data.temperature;
+            inputs[num_bsec_inputs].time_stamp = timestamp;
+            ++num_bsec_inputs;
+          }
+          if (sensor_settings.process_data & BSEC_PROCESS_HUMIDITY) {
+            inputs[num_bsec_inputs].sensor_id = BSEC_INPUT_HUMIDITY;
+            inputs[num_bsec_inputs].signal = data.humidity;
+            inputs[num_bsec_inputs].time_stamp = timestamp;
+            ++num_bsec_inputs;
+          }
+          if (sensor_settings.process_data & BSEC_PROCESS_GAS) {
+            if (data.status & BME680_GASM_VALID_MSK) {
+              inputs[num_bsec_inputs].sensor_id = BSEC_INPUT_GASRESISTOR;
+              inputs[num_bsec_inputs].signal = data.gas_resistance;
+              inputs[num_bsec_inputs].time_stamp = timestamp;
+              ++num_bsec_inputs;
+            }
+          }
         }
-        printf("\n");
+      }
 
-        /* Run measurement once per five seconds */
-        vTaskDelay(pdMS_TO_TICKS(5000-period));
+      if (num_bsec_inputs > 0) {
+        float temperature = 0.0f;
+        float pressure = 0.0f;
+        float humidity = 0.0f;
+        float iaq = 0.0f;
 
-        /* Trigger the next measurement  */
-        if (sensor.power_mode == BME680_FORCED_MODE) {
-            ESP_ERROR_CHECK((bme_rslt = bme680_set_sensor_mode(&sensor)));
+        num_bsec_outputs = BSEC_NUMBER_OUTPUTS;
+        bsec_res = bsec_do_steps(inputs, num_bsec_inputs, outputs, &num_bsec_outputs);
+
+        for (int i = 0; i < num_bsec_outputs; ++i) {
+          switch(outputs[i].sensor_id) {
+            case BSEC_OUTPUT_IAQ:
+              iaq = outputs[i].signal;
+              break;
+            case BSEC_OUTPUT_SENSOR_HEAT_COMPENSATED_TEMPERATURE:
+              temperature = outputs[i].signal;
+              break;
+            case BSEC_OUTPUT_SENSOR_HEAT_COMPENSATED_HUMIDITY:
+              humidity = outputs[i].signal;
+              break;
+            case BSEC_OUTPUT_RAW_PRESSURE:
+              pressure = outputs[i].signal;
+              break;
+            default:
+              break;
+          }
         }
+        printf("T: %.1f degC, P: %.1f hPa, H: %.1f %%rH ",
+               temperature, pressure / 100.0f, humidity);
+        printf(", IAQ: %.0f\n", iaq);
+      }
+
+      sleep_interval = (sensor_settings.next_call - esp_timer_get_time() * 1000LL) / 1000000LL;
+      if (sleep_interval > 0) {
+        vTaskDelay(pdMS_TO_TICKS(sleep_interval));
+      }
     }
 }
