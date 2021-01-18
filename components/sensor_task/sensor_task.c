@@ -18,7 +18,7 @@ static const char *MY_NVS_KEY = "bsec_status";
 /* BSEC setup data */
 #define REQ_SENSORS (4)
 static const bsec_sensor_configuration_t requested_virtual_sensors[REQ_SENSORS] = {
-  {.sensor_id = BSEC_OUTPUT_IAQ, .sample_rate = BSEC_SAMPLE_RATE_ULP},
+  {.sensor_id = BSEC_OUTPUT_IAQ, .sample_rate = BSEC_SAMPLE_RATE_LP},
   {.sensor_id = BSEC_OUTPUT_RAW_PRESSURE, .sample_rate = BSEC_SAMPLE_RATE_LP},
   {.sensor_id = BSEC_OUTPUT_SENSOR_HEAT_COMPENSATED_HUMIDITY, .sample_rate = BSEC_SAMPLE_RATE_LP},
   {.sensor_id = BSEC_OUTPUT_SENSOR_HEAT_COMPENSATED_TEMPERATURE, .sample_rate = BSEC_SAMPLE_RATE_LP}
