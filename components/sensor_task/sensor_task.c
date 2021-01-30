@@ -23,6 +23,7 @@ static const bsec_sensor_configuration_t requested_virtual_sensors[REQ_SENSORS] 
   {.sensor_id = BSEC_OUTPUT_SENSOR_HEAT_COMPENSATED_HUMIDITY, .sample_rate = BSEC_SAMPLE_RATE_LP},
   {.sensor_id = BSEC_OUTPUT_SENSOR_HEAT_COMPENSATED_TEMPERATURE, .sample_rate = BSEC_SAMPLE_RATE_LP}
 };
+static const uint32_t save_interval = 1200; // 1 hour with 3 second sample interval
 
 /* global variables
  * keep large structs out of stack
@@ -102,6 +103,7 @@ static void store_status() {
 }
 
 void sensor_task(void * param) {
+    uint32_t n_samples = 0;
     int8_t bme_rslt = BME680_OK;
     uint8_t bme_req_settings;
     uint16_t period;
@@ -240,6 +242,12 @@ void sensor_task(void * param) {
         printf("T: %.1f degC, P: %.1f hPa, H: %.1f %%rH ",
                temperature, pressure / 100.0f, humidity);
         printf(", IAQ: %.0f\n", iaq);
+      }
+
+      n_samples += 1;
+      if (n_samples >= save_interval) {
+        store_status();
+        n_samples = 0;
       }
 
       sleep_interval = (sensor_settings.next_call - esp_timer_get_time() * 1000LL) / 1000000LL;
