@@ -35,6 +35,10 @@ static uint8_t serialized_settings[BSEC_MAX_PROPERTY_BLOB_SIZE];
 
 static bsec_sensor_configuration_t required_sensor_settings[BSEC_MAX_PHYSICAL_SENSOR];
 
+/**
+ * @brief restore the state of the BSEC library from non-volatile storage
+ * 
+ */
 static void load_status() {
   size_t len = BSEC_MAX_PROPERTY_BLOB_SIZE;
   bsec_library_return_t bsec_res;
@@ -102,12 +106,9 @@ static void store_status() {
   nvs_close(nvs);
 }
 
-void sensor_task(void * param) {
-    uint32_t n_samples = 0;
-    int8_t bme_rslt = BME680_OK;
-    uint8_t bme_req_settings;
-    uint16_t period;
+static void setup() {
     bsec_version_t version;
+    int8_t bme_rslt = BME680_OK;
     bsec_library_return_t bsec_res;
     uint8_t n_required_sensor_settings = BSEC_MAX_PHYSICAL_SENSOR;
 
@@ -138,12 +139,27 @@ void sensor_task(void * param) {
       ESP_LOGE(TAG, "Failed to update BSEC subscription, error: %d", bsec_res);
       ESP_ERROR_CHECK(ESP_FAIL);
     }
+}
+
+/**
+ * @brief The main sensor reading/data processing task
+ * 
+ * @param [in] param Not used
+ */
+void sensor_task(void * param) {
+    uint32_t n_samples = 0;
+    uint8_t bme_req_settings;
+    uint16_t period;
+
+    setup();
     
     /* Main loop */
     ESP_LOGI(TAG, "Start reading sensor data");
     while (1) {
       int64_t timestamp;
       int64_t sleep_interval;
+      bsec_library_return_t bsec_res;
+      int8_t bme_rslt = BME680_OK;
       bsec_bme_settings_t sensor_settings;
       uint8_t num_bsec_inputs;
       uint8_t num_bsec_outputs;
@@ -152,6 +168,9 @@ void sensor_task(void * param) {
 
       timestamp = esp_timer_get_time() * 1000LL;
       bsec_res = bsec_sensor_control(timestamp, &sensor_settings);
+      if (bsec_res != BSEC_OK) {
+        ESP_LOGW(TAG, "bsec_sensor_control error %d", bsec_res);
+      }
 
       if (sensor_settings.trigger_measurement) {
         sensor.tph_sett.os_hum = sensor_settings.humidity_oversampling;
@@ -216,7 +235,7 @@ void sensor_task(void * param) {
         float temperature = 0.0f;
         float pressure = 0.0f;
         float humidity = 0.0f;
-        float iaq = 0.0f;
+        float iaq = -1.0f;
 
         num_bsec_outputs = BSEC_NUMBER_OUTPUTS;
         bsec_res = bsec_do_steps(inputs, num_bsec_inputs, outputs, &num_bsec_outputs);
